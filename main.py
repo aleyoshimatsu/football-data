@@ -21,6 +21,8 @@ if __name__ == "__main__":
 
     client = ExtractorFootballData("https://www.football-data.co.uk", markets)
     client.extract()
+    log.info(client.dict_data_updated)
+    log.info(client.dict_items)
 
     # football_data = FootballData()
     # football_data.get_football_data()

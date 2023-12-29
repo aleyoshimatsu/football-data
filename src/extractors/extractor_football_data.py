@@ -15,29 +15,35 @@ data_item = namedtuple('data_item', ["league", "url", "file_name", "text"])
 class ExtractorFootballData:
 
     def __init__(self, endpoint, markets: dict):
-        self.link_dict = dict()
-        self.data_items = set()
         self.session = requests.Session()
         self.endpoint = endpoint
         self.path_resources = Path(os.getcwd()) / 'resources'
         self.path_resources.mkdir(parents=True, exist_ok=True)
 
+        self.dict_items = dict()
+        self.dict_data_updated = dict()
+
         # Add initial links
+        self.link_dict = dict()
         self.link_dict = {k: f"{endpoint}/{v}" for k, v in markets.items()}
 
-    def extract_codigo_if(text):
-        codigo_if = ""
+    def extract_patterns(self, html_text):
+        data_file = ""
+        last_updated = ""
 
-        patterns = [r'(?<=IF:)[ A-Za-z0-9]+', r'(?<=1F:)[ A-Za-z0-9]+', r'(?<=IP:)[ A-Za-z0-9]+']
+        pattern = r'(?<=Data Files: )[ A-Za-z0-9]+'
+        # <b>Data Files: Brazil</b>
+        re_data_files = re.findall(pattern, html_text)
+        if re_data_files and len(re_data_files) > 0:
+            data_file = re_data_files[0].strip()
 
-        for pattern in patterns:
-            re_codigo_if = re.findall(pattern, text)
+        pattern = r'(?<=Last updated: )[ \t/0-9\\]+'
+        # <i>Last updated: 	08/12/23</i>
+        re_last_updated = re.findall(pattern, html_text)
+        if re_last_updated and len(re_last_updated) > 0:
+            last_updated = re_last_updated[0].strip()
 
-            if re_codigo_if and len(re_codigo_if) > 0:
-                codigo_if = re_codigo_if[0].strip()
-                break
-
-        return codigo_if
+        return data_file, last_updated
 
     def extract(self):
         for league, url in self.link_dict.items():
@@ -46,7 +52,7 @@ class ExtractorFootballData:
 
     def __fetch_links(self, league, url):
         soup = self.__get_page_soup(url)
-        self.__collect_page_links(soup, league, url)
+        self.__collect_page_data(soup, league, url)
 
     def __get_page_soup(self, url):
         response = self.session.get(url)
@@ -54,14 +60,25 @@ class ExtractorFootballData:
         soup = BeautifulSoup(root_html, 'html.parser')
         return soup
 
-    def __collect_page_links(self, soup, league, url):
+    def __collect_page_data(self, soup, league, url):
+        data_file, last_updated = self.extract_patterns(soup.text)
+        self.dict_data_updated[data_file] = last_updated
+
         all_links = soup.find_all('a')
 
         for link in all_links:
             href = link.get('href')
 
             if self.__is_csv_file(href):  # link is a file like: .csv, .zip, .json
-                self.__add_data_item(link, league, url)
+                item = self.__get_data_item(link, league, url)
+                self.__download_item(item)
+
+                if data_file in self.dict_items:
+                    self.dict_items[data_file].add(item)
+                else:
+                    self.dict_items[data_file] = set()
+                    self.dict_items[data_file].add(item)
+                log.info(f"added file link {item.url}")
 
     def __is_csv_file(self, href):
         path_href = href.split('.')
@@ -69,15 +86,13 @@ class ExtractorFootballData:
             return True
         return False
 
-    def __add_data_item(self, link, league, url):
+    def __get_data_item(self, link, league, url):
         href = link.get('href')
         file_name = self.__format_href(href)
         text = link.text
         dlink = f"{self.endpoint}/{href}"
         item = data_item(league, dlink, file_name, text)
-        self.data_items.add(item)
-        self.__download_item(item)
-        log.info(f"added file link {dlink}")
+        return item
 
     def __download_item(self, item):
         dir_path = Path(f"{self.path_resources}/{item.league}")
